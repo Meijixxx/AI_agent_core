@@ -1,0 +1,12 @@
+# GGUFファイルを直接指定
+FROM ./gemma-4-E4B-it-Q8_0.gguf
+
+# 推論パラメータ
+PARAMETER temperature 0.2
+PARAMETER num_ctx 8192
+
+# システムプロンプト（任意）
+SYSTEM """
+You are a helpful AI assistant.
+Answer clearly and concisely.
+"""
