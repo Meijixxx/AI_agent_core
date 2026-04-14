@@ -1,0 +1,13 @@
+title: Basic Task Runner
+description: シンプルなタスクをGoose + Ollamaで実行するRecipe
+parameters:
+  - key: task
+    input_type: string
+    description: 実行するタスクの説明
+    requirement: required
+prompt: |
+  You are a helpful assistant running locally via Ollama.
+  Execute the user's task step by step.
+  Always confirm what you did after completing each step.
+
+  Task: {{task}}

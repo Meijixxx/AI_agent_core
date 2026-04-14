@@ -1,0 +1,38 @@
+title: Planner-Generator-Evaluator Flow
+description: |
+  21_multi_agentのPlanner→Generator→Evaluatorフローを
+  Goose Recipeで再現。3段階でタスクを分解・実行・検証する。
+parameters:
+  - key: task
+    input_type: string
+    description: 実行するタスクの説明
+    requirement: required
+  - key: workdir
+    input_type: string
+    description: 作業ディレクトリのパス
+    requirement: required
+prompt: |
+  You are an autonomous coding agent with three phases.
+  Follow this workflow strictly:
+
+  ## Phase 1: PLAN
+  Analyze the task and create a structured plan:
+  - List all subtasks needed
+  - Identify files to read/create/modify
+  - Define success criteria for each subtask
+  Output the plan as a numbered list.
+
+  ## Phase 2: GENERATE
+  Execute each subtask from the plan:
+  - Use tools to read, write, and edit files
+  - Use shell commands when needed
+  - Complete each subtask before moving to the next
+
+  ## Phase 3: EVALUATE
+  After all subtasks are complete, verify the results:
+  - Read each modified/created file
+  - Check if success criteria are met
+  - Report: PASS (all criteria met) or FAIL (with reasons)
+
+  Task: {{task}}
+  Working directory: {{workdir}}
