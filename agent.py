@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 import llm
 from config import CFG
@@ -30,7 +30,11 @@ _COLOR_RESET = "\033[0m"
 
 
 class Agent:
-    def __init__(self, auto_confirm: bool = False) -> None:
+    def __init__(
+        self,
+        auto_confirm: bool = False,
+        tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
+    ) -> None:
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
@@ -43,8 +47,10 @@ class Agent:
         }
         # auto_confirm=True で危険ツールと編集を無確認で実行（サーバーモード用）
         self.auto_confirm = auto_confirm
+        # tool_executor を差し替えることでリモート実行（クライアントで実行）に対応
+        self.tool_executor: Callable[[str, dict[str, Any]], str] = tool_executor or execute_tool
         self.logger = get_logger()
-        self.logger.info(f"新規セッション開始 (auto_confirm={auto_confirm})")
+        self.logger.info(f"新規セッション開始 (auto_confirm={auto_confirm}, remote={tool_executor is not None})")
 
     def run(self, user_input: str) -> None:
         """ユーザー入力を処理し、tool-useループを実行する。"""
@@ -136,7 +142,7 @@ class Agent:
 
                 self._print_tool_call(name, arguments)
 
-                result = execute_tool(name, arguments)
+                result = self.tool_executor(name, arguments)
                 print(f"  → {self._truncate(result, 200)}")
                 self.logger.info(f"tool result: {self._truncate(result, 500)}")
 

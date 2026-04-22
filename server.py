@@ -1,15 +1,23 @@
 """FastAPI サーバー: LAN 内の他PCからエージェントを利用できるようにする
 
+アーキテクチャ:
+  [クライアントPC] --chat-->  [サーバPC(このPC): LLM]
+                  <--tool--             ↑ LLM制御
+                  <--tool_call--        ツール実行はクライアント側で！
+                  -->tool_result-->
+                  <--done--
+
 起動方法:
     python server.py
 
 API:
-    POST   /sessions                 新規セッション作成 (returns {session_id})
-    GET    /sessions                 セッション一覧
-    DELETE /sessions/{id}            セッション削除
-    POST   /sessions/{id}/chat       メッセージ送信 (body: {message: "..."}) -> 応答
-    GET    /sessions/{id}/stats      統計取得
-    GET    /health                   疎通確認
+    POST   /sessions                       新規セッション作成
+    DELETE /sessions/{id}                  セッション削除
+    POST   /sessions/{id}/chat             メッセージ送信（非同期開始）
+    GET    /sessions/{id}/next             次のイベントをロングポール取得
+    POST   /sessions/{id}/tool_result      ツール実行結果をサーバに返す
+    GET    /sessions/{id}/stats            統計取得
+    GET    /health                         疎通確認
 
 認証:
     X-API-Key ヘッダーに config.toml の server.api_key を指定
@@ -17,6 +25,8 @@ API:
 
 import io
 import os
+import queue
+import threading
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
@@ -28,16 +38,12 @@ from pydantic import BaseModel
 from agent import Agent
 from config import CFG
 from logger import setup_logging
-from tools.file_ops import set_sandbox_root
 
 # --- 初期化 ---
 logger = setup_logging(CFG.log_dir, CFG.log_level)
 logger.info("=== AI Agent Server 起動 ===")
 
-# サンドボックス: 作業ディレクトリを起点
-set_sandbox_root(os.getcwd())
-
-app = FastAPI(title="AI Agent Core Server", version="1.0")
+app = FastAPI(title="AI Agent Core Server", version="2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CFG.server_cors_origins,
@@ -46,8 +52,86 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# セッション管理（メモリ内）
-_sessions: dict[str, Agent] = {}
+
+# --- セッション状態 ---
+class SessionState:
+    """1セッションの状態（Agent + イベントキュー + スレッド）"""
+
+    def __init__(self) -> None:
+        self.agent: Agent = Agent(
+            auto_confirm=CFG.server_auto_confirm,
+            tool_executor=self._remote_tool,
+        )
+        self.event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.tool_result_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.running_thread: threading.Thread | None = None
+        self.lock = threading.Lock()
+
+    def _remote_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        """Agent スレッドから呼ばれる。クライアントにツール要求を投げて結果を待つ。"""
+        call_id = uuid.uuid4().hex[:8]
+        self.event_queue.put({
+            "type": "tool_call",
+            "call_id": call_id,
+            "name": name,
+            "arguments": arguments,
+        })
+        # 該当 call_id の結果を待つ（他の call_id が混ざっていたら元に戻す）
+        while True:
+            try:
+                result = self.tool_result_queue.get(timeout=600)
+            except queue.Empty:
+                logger.warning(f"tool_result timeout for {call_id}")
+                return "[エラー] クライアントからのツール結果がタイムアウトしました"
+            if result.get("call_id") == call_id:
+                return result.get("content", "")
+            # call_id 不一致は戻して再取得
+            self.tool_result_queue.put(result)
+
+    def start_chat(self, message: str) -> None:
+        """メッセージ処理をバックグラウンドスレッドで開始する。"""
+        with self.lock:
+            if self.running_thread is not None and self.running_thread.is_alive():
+                raise HTTPException(status_code=409, detail="previous chat still running")
+
+            def run() -> None:
+                buf_out = io.StringIO()
+                buf_err = io.StringIO()
+                try:
+                    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+                        self.agent.run(message)
+                except Exception as e:
+                    logger.exception(f"agent.run failed: {e}")
+                    self.event_queue.put({"type": "error", "message": str(e)})
+                    return
+                # 最新 assistant メッセージを抽出
+                assistant_text = ""
+                for m in reversed(self.agent.messages):
+                    if m.get("role") == "assistant":
+                        assistant_text = m.get("content", "") or ""
+                        break
+                self.event_queue.put({
+                    "type": "done",
+                    "assistant": assistant_text,
+                    "output": buf_out.getvalue(),
+                    "stderr": buf_err.getvalue(),
+                })
+
+            self.running_thread = threading.Thread(target=run, daemon=True)
+            self.running_thread.start()
+
+    def next_event(self, timeout: int = 30) -> dict[str, Any]:
+        """次のイベントをロングポールで取得する。タイムアウト時は heartbeat を返す。"""
+        try:
+            return self.event_queue.get(timeout=timeout)
+        except queue.Empty:
+            return {"type": "heartbeat"}
+
+    def submit_tool_result(self, call_id: str, content: str) -> None:
+        self.tool_result_queue.put({"call_id": call_id, "content": content})
+
+
+_sessions: dict[str, SessionState] = {}
 
 
 # --- 認証 ---
@@ -56,24 +140,14 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header")
 
 
-# --- リクエスト/レスポンスモデル ---
+# --- リクエストモデル ---
 class ChatRequest(BaseModel):
     message: str
 
 
-class ChatResponse(BaseModel):
-    session_id: str
-    assistant: str
-    output: str
-    stderr: str
-
-
-class SessionInfo(BaseModel):
-    session_id: str
-    messages: int
-    prompt_tokens: int
-    completion_tokens: int
-    tool_calls: int
+class ToolResultRequest(BaseModel):
+    call_id: str
+    content: str
 
 
 # --- エンドポイント ---
@@ -90,25 +164,9 @@ def health() -> dict[str, Any]:
 @app.post("/sessions", dependencies=[Depends(require_api_key)])
 def create_session() -> dict[str, str]:
     session_id = uuid.uuid4().hex[:12]
-    _sessions[session_id] = Agent(auto_confirm=CFG.server_auto_confirm)
+    _sessions[session_id] = SessionState()
     logger.info(f"session created: {session_id}")
     return {"session_id": session_id}
-
-
-@app.get("/sessions", dependencies=[Depends(require_api_key)])
-def list_sessions() -> list[SessionInfo]:
-    result = []
-    for sid, agent in _sessions.items():
-        result.append(
-            SessionInfo(
-                session_id=sid,
-                messages=len(agent.messages),
-                prompt_tokens=agent.stats["prompt_tokens"],
-                completion_tokens=agent.stats["completion_tokens"],
-                tool_calls=agent.stats["tool_calls"],
-            )
-        )
-    return result
 
 
 @app.delete("/sessions/{session_id}", dependencies=[Depends(require_api_key)])
@@ -120,52 +178,41 @@ def delete_session(session_id: str) -> dict[str, str]:
     return {"status": "deleted"}
 
 
-@app.post("/sessions/{session_id}/chat", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
-def chat(session_id: str, req: ChatRequest) -> ChatResponse:
-    agent = _sessions.get(session_id)
-    if agent is None:
+@app.post("/sessions/{session_id}/chat", dependencies=[Depends(require_api_key)])
+def chat(session_id: str, req: ChatRequest) -> dict[str, str]:
+    state = _sessions.get(session_id)
+    if state is None:
         raise HTTPException(status_code=404, detail="session not found")
+    state.start_chat(req.message)
+    logger.info(f"chat started: {session_id} msg={req.message[:100]}")
+    return {"status": "started"}
 
-    buf_out = io.StringIO()
-    buf_err = io.StringIO()
-    try:
-        with redirect_stdout(buf_out), redirect_stderr(buf_err):
-            agent.run(req.message)
-    except Exception as e:
-        logger.exception(f"chat failed for {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"agent run failed: {e}")
 
-    # 最新の assistant メッセージを抽出
-    assistant_text = ""
-    for m in reversed(agent.messages):
-        if m.get("role") == "assistant":
-            assistant_text = m.get("content", "") or ""
-            break
+@app.get("/sessions/{session_id}/next", dependencies=[Depends(require_api_key)])
+def next_event(session_id: str) -> dict[str, Any]:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return state.next_event(timeout=30)
 
-    return ChatResponse(
-        session_id=session_id,
-        assistant=assistant_text,
-        output=buf_out.getvalue(),
-        stderr=buf_err.getvalue(),
-    )
+
+@app.post("/sessions/{session_id}/tool_result", dependencies=[Depends(require_api_key)])
+def tool_result(session_id: str, req: ToolResultRequest) -> dict[str, str]:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    state.submit_tool_result(req.call_id, req.content)
+    return {"status": "ok"}
 
 
 @app.get("/sessions/{session_id}/stats", dependencies=[Depends(require_api_key)])
 def stats(session_id: str) -> dict[str, Any]:
-    agent = _sessions.get(session_id)
-    if agent is None:
+    state = _sessions.get(session_id)
+    if state is None:
         raise HTTPException(status_code=404, detail="session not found")
     return {
         "session_id": session_id,
-        "stats": {
-            "prompt_tokens": agent.stats["prompt_tokens"],
-            "completion_tokens": agent.stats["completion_tokens"],
-            "tool_calls": agent.stats["tool_calls"],
-            "gen_time_ms": agent.stats["gen_time_ms"],
-            "start_time": agent.stats["start_time"].isoformat(),
-            "messages": len(agent.messages),
-        },
-        "display": agent.get_stats_display(),
+        "display": state.agent.get_stats_display(),
     }
 
 
@@ -174,11 +221,11 @@ if __name__ == "__main__":
     import uvicorn
 
     print("=" * 50)
-    print("  AI Agent Server")
+    print("  AI Agent Server (remote-tool mode)")
     print(f"  モデル: {CFG.model}")
     print(f"  ホスト: {CFG.server_host}:{CFG.server_port}")
-    print(f"  作業ディレクトリ: {os.getcwd()}")
     print(f"  API キー: {'(未設定)' if not CFG.server_api_key else '(設定済み)'}")
+    print("  ※ ツール実行はクライアント側で行われます")
     print("=" * 50)
     if CFG.server_api_key == "change-me-to-random-string":
         print("[警告] API キーがデフォルト値のままです。config.toml で変更してください。")
