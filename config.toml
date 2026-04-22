@@ -13,6 +13,14 @@ token_budget_warn_ratio = 0.8
 [paths]
 session_dir = "sessions"
 log_dir = "logs"
+rag_dir = "rag_store"
+
+[rag]
+# ollama pull nomic-embed-text が必要
+embedding_model = "nomic-embed-text"
+chunk_size = 500      # チャンクあたりの最大文字数
+chunk_overlap = 50    # チャンク間の重複文字数
+top_k = 5             # rag_search のデフォルト返却件数
 
 [log]
 level = "INFO"

@@ -7,6 +7,7 @@ from tools.shell import run_command
 from tools.git_tools import git_status, git_diff, git_log
 from tools.web import fetch_url
 from tools.patch_tool import apply_patch
+from tools.rag_tools import rag_index, rag_search, rag_list, rag_remove, rag_clear
 
 # ツール実装のマッピング
 _TOOL_IMPLS: dict[str, Callable[..., str]] = {
@@ -21,10 +22,15 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
     "git_log": git_log,
     "fetch_url": fetch_url,
     "apply_patch": apply_patch,
+    "rag_index": rag_index,
+    "rag_search": rag_search,
+    "rag_list": rag_list,
+    "rag_remove": rag_remove,
+    "rag_clear": rag_clear,
 }
 
 # 書き込み系ツール（実行前にユーザー確認が必要）
-DANGEROUS_TOOLS = {"write_file", "edit_file", "run_command", "apply_patch"}
+DANGEROUS_TOOLS = {"write_file", "edit_file", "run_command", "apply_patch", "rag_clear"}
 
 # Ollama API に渡すツール定義
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -183,6 +189,73 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "diff_text": {"type": "string", "description": "Unified diff content"},
                 },
                 "required": ["diff_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_index",
+            "description": "Index a file or directory into the RAG vector store so it can be searched later. Supports .txt/.md/.py/.pdf/.docx and more.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File or directory path to index"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_search",
+            "description": "Search the RAG index for document chunks relevant to a query. Use this before answering questions about indexed documents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "top_k": {"type": "integer", "description": "Number of results to return (default: 5, max: 10)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_list",
+            "description": "List all documents currently indexed in the RAG store with their chunk counts.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_remove",
+            "description": "Remove a specific file's chunks from the RAG index.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to remove from the index"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_clear",
+            "description": "Clear all chunks from the RAG index. This is destructive and cannot be undone.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
             },
         },
     },

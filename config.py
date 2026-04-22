@@ -24,6 +24,12 @@ class Config:
 
     session_dir: str = "sessions"
     log_dir: str = "logs"
+    rag_dir: str = "rag_store"
+
+    embedding_model: str = "nomic-embed-text"
+    rag_chunk_size: int = 500
+    rag_chunk_overlap: int = 50
+    rag_top_k: int = 5
 
     log_level: str = "INFO"
 
@@ -63,6 +69,12 @@ def load_config(path: str = "config.toml") -> Config:
 
     cfg.session_dir = _get(data, "paths", "session_dir", cfg.session_dir)
     cfg.log_dir = _get(data, "paths", "log_dir", cfg.log_dir)
+    cfg.rag_dir = _get(data, "paths", "rag_dir", cfg.rag_dir)
+
+    cfg.embedding_model = _get(data, "rag", "embedding_model", cfg.embedding_model)
+    cfg.rag_chunk_size = _get(data, "rag", "chunk_size", cfg.rag_chunk_size)
+    cfg.rag_chunk_overlap = _get(data, "rag", "chunk_overlap", cfg.rag_chunk_overlap)
+    cfg.rag_top_k = _get(data, "rag", "top_k", cfg.rag_top_k)
 
     cfg.log_level = _get(data, "log", "level", cfg.log_level)
 
