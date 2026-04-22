@@ -58,19 +58,16 @@ class SessionState:
     """1セッションの状態（Agent + イベントキュー + スレッド）"""
 
     def __init__(self) -> None:
+        # 生成中タイマーはクライアント側で表示するため、サーバ側は no-op で抑制
         self.agent: Agent = Agent(
             auto_confirm=CFG.server_auto_confirm,
             tool_executor=self._remote_tool,
-            progress_callback=self._progress,
+            progress_callback=lambda _elapsed: None,
         )
         self.event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
         self.tool_result_queue: queue.Queue[dict[str, Any]] = queue.Queue()
         self.running_thread: threading.Thread | None = None
         self.lock = threading.Lock()
-
-    def _progress(self, elapsed: float) -> None:
-        """LLM 生成中の経過秒数をクライアントへ転送する。"""
-        self.event_queue.put({"type": "progress", "elapsed": elapsed})
 
     def _remote_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Agent スレッドから呼ばれる。クライアントにツール要求を投げて結果を待つ。"""

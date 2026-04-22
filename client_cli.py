@@ -25,12 +25,55 @@ import argparse
 import json
 import os
 import sys
+import threading
+import time
 
 import requests
 
 # クライアント側でローカル実行するツール群（server と同じ tools/ を流用）
 from tools import DANGEROUS_TOOLS, execute_tool
 from tools.file_ops import set_sandbox_root
+
+
+class ProgressTimer:
+    """LLM生成中の経過時間をローカルに表示するタイマー。"""
+
+    def __init__(self) -> None:
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._showing = False
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=0.3)
+            self._thread = None
+        if self._showing:
+            try:
+                sys.stderr.write("\r" + " " * 40 + "\r")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            self._showing = False
+
+    def _run(self) -> None:
+        start = time.time()
+        while not self._stop.is_set():
+            elapsed = time.time() - start
+            try:
+                sys.stderr.write(f"\r[生成中... {elapsed:.1f}s]")
+                sys.stderr.flush()
+                self._showing = True
+            except Exception:
+                return
+            time.sleep(0.1)
 
 
 def format_args(arguments: dict) -> str:
@@ -87,15 +130,9 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
         print(f"[エラー] chat 開始失敗: {e}")
         return
 
-    # イベントループ
-    showing_progress = False
-
-    def clear_progress_line() -> None:
-        nonlocal showing_progress
-        if showing_progress:
-            sys.stderr.write("\r" + " " * 40 + "\r")
-            sys.stderr.flush()
-            showing_progress = False
+    # LLMが考え始めた: ローカルタイマーを動かす
+    timer = ProgressTimer()
+    timer.start()
 
     while True:
         try:
@@ -107,10 +144,10 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
             r.raise_for_status()
             event = r.json()
         except requests.Timeout:
-            # heartbeat 相当。継続
+            # heartbeat 相当。継続（タイマーは回ったまま）
             continue
         except Exception as e:
-            clear_progress_line()
+            timer.stop()
             print(f"[エラー] イベント取得失敗: {e}")
             return
 
@@ -119,15 +156,8 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
         if etype == "heartbeat":
             continue
 
-        if etype == "progress":
-            elapsed = event.get("elapsed", 0)
-            sys.stderr.write(f"\r[生成中... {elapsed:.1f}s]")
-            sys.stderr.flush()
-            showing_progress = True
-            continue
-
-        # progress 以外のイベントが来たら表示行をクリア
-        clear_progress_line()
+        # 何らかのイベントが来た = LLMが一度止まった
+        timer.stop()
 
         if etype == "tool_call":
             call_id = event["call_id"]
@@ -150,6 +180,8 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
             except Exception as e:
                 print(f"[エラー] ツール結果送信失敗: {e}")
                 return
+            # 次のLLM呼び出しが始まるのでタイマー再開
+            timer.start()
             continue
 
         if etype == "done":
