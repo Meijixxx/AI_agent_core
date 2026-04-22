@@ -88,6 +88,15 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
         return
 
     # イベントループ
+    showing_progress = False
+
+    def clear_progress_line() -> None:
+        nonlocal showing_progress
+        if showing_progress:
+            sys.stderr.write("\r" + " " * 40 + "\r")
+            sys.stderr.flush()
+            showing_progress = False
+
     while True:
         try:
             r = requests.get(
@@ -101,6 +110,7 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
             # heartbeat 相当。継続
             continue
         except Exception as e:
+            clear_progress_line()
             print(f"[エラー] イベント取得失敗: {e}")
             return
 
@@ -108,6 +118,16 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
 
         if etype == "heartbeat":
             continue
+
+        if etype == "progress":
+            elapsed = event.get("elapsed", 0)
+            sys.stderr.write(f"\r[生成中... {elapsed:.1f}s]")
+            sys.stderr.flush()
+            showing_progress = True
+            continue
+
+        # progress 以外のイベントが来たら表示行をクリア
+        clear_progress_line()
 
         if etype == "tool_call":
             call_id = event["call_id"]

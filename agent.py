@@ -34,6 +34,7 @@ class Agent:
         self,
         auto_confirm: bool = False,
         tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
+        progress_callback: Callable[[float], None] | None = None,
     ) -> None:
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
@@ -49,6 +50,8 @@ class Agent:
         self.auto_confirm = auto_confirm
         # tool_executor を差し替えることでリモート実行（クライアントで実行）に対応
         self.tool_executor: Callable[[str, dict[str, Any]], str] = tool_executor or execute_tool
+        # progress_callback: LLM生成中の経過秒数を通知（サーバ→クライアント転送用）
+        self.progress_callback = progress_callback
         self.logger = get_logger()
         self.logger.info(f"新規セッション開始 (auto_confirm={auto_confirm}, remote={tool_executor is not None})")
 
@@ -64,6 +67,7 @@ class Agent:
                 response = llm.chat(
                     messages=self.messages,
                     tools=TOOL_DEFINITIONS,
+                    progress_callback=self.progress_callback,
                 )
             except Exception as e:
                 self.logger.error(f"LLM 呼び出しエラー: {e}")

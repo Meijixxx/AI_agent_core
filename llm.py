@@ -4,7 +4,7 @@ import json
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -103,10 +103,14 @@ def chat(
     tools: list[dict[str, Any]] | None = None,
     model: str = None,  # type: ignore
     stream: bool = False,
+    progress_callback: Callable[[float], None] | None = None,
 ) -> dict[str, Any] | None:
     """Ollama /api/chat を呼び出す。タイマー表示 + Ctrl+C 中断対応。
 
     中断された場合は None を返す。
+
+    progress_callback が渡された場合、stderr ではなく経過秒数をコールバックに通知する
+    （サーバーモードからリモートクライアントに表示させるため）。
     """
     if model is None:
         model = CFG.model
@@ -118,22 +122,33 @@ def chat(
 
     def timer_worker() -> None:
         start = time.time()
+        last_callback = 0.0
         # 最初のトークン受信 or 完了まで表示
         while not first_token_event.is_set() and not cancel_event.is_set():
             elapsed = time.time() - start
-            msg = f"\r[生成中... {elapsed:.1f}s]"
+            if progress_callback is not None:
+                # コールバックは1秒間隔で間引き（ネットワーク経由の場合のため）
+                if elapsed - last_callback >= 1.0:
+                    try:
+                        progress_callback(elapsed)
+                    except Exception:
+                        pass
+                    last_callback = elapsed
+            else:
+                msg = f"\r[生成中... {elapsed:.1f}s]"
+                try:
+                    sys.stderr.write(msg)
+                    sys.stderr.flush()
+                except Exception:
+                    return
+            time.sleep(0.1)
+        # 行クリア（ローカルモードのみ）
+        if progress_callback is None:
             try:
-                sys.stderr.write(msg)
+                sys.stderr.write("\r" + " " * 40 + "\r")
                 sys.stderr.flush()
             except Exception:
-                return
-            time.sleep(0.1)
-        # 行クリア
-        try:
-            sys.stderr.write("\r" + " " * 40 + "\r")
-            sys.stderr.flush()
-        except Exception:
-            pass
+                pass
 
     def llm_worker() -> None:
         for attempt in range(MAX_RETRIES + 1):

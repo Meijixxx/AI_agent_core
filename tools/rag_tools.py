@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-from config import CFG
 from rag import get_store
+from rag._settings import CHUNK_OVERLAP, CHUNK_SIZE
 from rag.embedder import embed
 from rag.indexer import chunk_text, read_text
 from tools.file_ops import _safe_path
@@ -50,7 +50,7 @@ def _index_file(abs_path: str, store) -> str:
     if not text.strip():
         return "スキップ（空ファイル）"
 
-    chunks = chunk_text(text, CFG.rag_chunk_size, CFG.rag_chunk_overlap)
+    chunks = chunk_text(text, CHUNK_SIZE, CHUNK_OVERLAP)
     if not chunks:
         return "スキップ（テキスト抽出失敗）"
 
