@@ -27,6 +27,12 @@ class Config:
 
     log_level: str = "INFO"
 
+    server_host: str = "0.0.0.0"
+    server_port: int = 8000
+    server_api_key: str = "change-me-to-random-string"
+    server_cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    server_auto_confirm: bool = True
+
 
 def _get(d: dict[str, Any], section: str, key: str, default: Any) -> Any:
     return d.get(section, {}).get(key, default)
@@ -59,6 +65,12 @@ def load_config(path: str = "config.toml") -> Config:
     cfg.log_dir = _get(data, "paths", "log_dir", cfg.log_dir)
 
     cfg.log_level = _get(data, "log", "level", cfg.log_level)
+
+    cfg.server_host = _get(data, "server", "host", cfg.server_host)
+    cfg.server_port = _get(data, "server", "port", cfg.server_port)
+    cfg.server_api_key = _get(data, "server", "api_key", cfg.server_api_key)
+    cfg.server_cors_origins = _get(data, "server", "cors_origins", cfg.server_cors_origins)
+    cfg.server_auto_confirm = _get(data, "server", "auto_confirm", cfg.server_auto_confirm)
 
     return cfg
 

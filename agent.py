@@ -30,7 +30,7 @@ _COLOR_RESET = "\033[0m"
 
 
 class Agent:
-    def __init__(self) -> None:
+    def __init__(self, auto_confirm: bool = False) -> None:
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
@@ -41,8 +41,10 @@ class Agent:
             "gen_time_ms": 0,
             "start_time": datetime.now(),
         }
+        # auto_confirm=True で危険ツールと編集を無確認で実行（サーバーモード用）
+        self.auto_confirm = auto_confirm
         self.logger = get_logger()
-        self.logger.info("新規セッション開始")
+        self.logger.info(f"新規セッション開始 (auto_confirm={auto_confirm})")
 
     def run(self, user_input: str) -> None:
         """ユーザー入力を処理し、tool-useループを実行する。"""
@@ -112,8 +114,8 @@ class Agent:
                 self.stats["tool_calls"] += 1
                 self.logger.info(f"tool call: {name} args={self._truncate(str(arguments), 200)}")
 
-                # edit_file は diff プレビュー
-                if name == "edit_file":
+                # edit_file は diff プレビュー（auto_confirm 時はスキップして自動実行）
+                if name == "edit_file" and not self.auto_confirm:
                     if not self._preview_edit_diff(arguments):
                         self.messages.append({
                             "role": "tool",
@@ -122,8 +124,8 @@ class Agent:
                         self.logger.info("edit_file skipped by user")
                         continue
 
-                # 危険なツールはユーザー確認（edit_file は diff プレビューで兼用）
-                if name in DANGEROUS_TOOLS and name != "edit_file":
+                # 危険なツールはユーザー確認（auto_confirm 時はスキップ）
+                if name in DANGEROUS_TOOLS and name != "edit_file" and not self.auto_confirm:
                     if not self._confirm_tool(name, arguments):
                         self.messages.append({
                             "role": "tool",
