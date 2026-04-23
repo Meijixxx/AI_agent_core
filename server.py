@@ -106,15 +106,10 @@ class SessionState:
                     logger.exception(f"agent.run failed: {e}")
                     self.event_queue.put({"type": "error", "message": str(e)})
                     return
-                # 最新 assistant メッセージを抽出
-                assistant_text = ""
-                for m in reversed(self.agent.messages):
-                    if m.get("role") == "assistant":
-                        assistant_text = m.get("content", "") or ""
-                        break
+                # 最終応答は output（agent の print 出力）に含まれるため、
+                # assistant フィールドは冗長なので送らない
                 self.event_queue.put({
                     "type": "done",
-                    "assistant": assistant_text,
                     "output": buf_out.getvalue(),
                     "stderr": buf_err.getvalue(),
                 })

@@ -190,9 +190,6 @@ def chat_once(base_url: str, headers: dict, sid: str, message: str, auto_confirm
                 sys.stdout.write(out)
                 if not out.endswith("\n"):
                     sys.stdout.write("\n")
-            assistant = event.get("assistant", "")
-            if assistant:
-                print(f"\n{assistant}")
             return
 
         if etype == "error":
