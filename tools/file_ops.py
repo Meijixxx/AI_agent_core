@@ -218,12 +218,13 @@ def _compute_chunks(text: str, max_chars: int) -> list[tuple[int, int, str]]:
     return chunks
 
 
-def read_file_chunk(path: str, chunk_index: int = 0, max_chars: int = 50000) -> str:
+def read_file_chunk(path: str, chunk_index: int = 0, max_chars: int = 5000) -> str:
     """ファイルを段落/コードブロック境界で分割し、N番目のチャンクを返す（0始まり）。
 
     大きなmdやテキストファイルをLLMで整形する際、ページ単位ではなく
     構造を壊さない境界で区切って処理するために使う。
-    デフォルト max_chars=50000（約12.5K tokens相当）。num_ctxに応じて調整可。
+    デフォルト max_chars=5000（約1.2K tokens相当）。入力は大きく取れても
+    出力トークン上限で整形結果が途切れやすいので、チャンクは小さめ推奨。
     最後のチャンクより後を指定すると [EOF] を返す。
     """
     abs_path, err = _safe_path(path)

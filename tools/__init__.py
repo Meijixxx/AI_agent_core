@@ -127,7 +127,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "properties": {
                     "path": {"type": "string", "description": "File path"},
                     "chunk_index": {"type": "integer", "description": "0-based chunk index"},
-                    "max_chars": {"type": "integer", "description": "Target chunk size in chars (default 50000, ≈12.5K tokens). Increase for larger num_ctx models."},
+                    "max_chars": {"type": "integer", "description": "Target chunk size in chars (default 5000, ≈1.2K tokens). Keep small because output token budget is the bottleneck, not input context."},
                 },
                 "required": ["path", "chunk_index"],
             },
