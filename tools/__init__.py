@@ -2,7 +2,10 @@
 
 from typing import Any, Callable
 
-from tools.file_ops import read_file, write_file, edit_file, list_files, search_files
+from tools.file_ops import (
+    read_file, write_file, edit_file, list_files, search_files,
+    append_file, get_pdf_info, read_pdf_pages,
+)
 from tools.shell import run_command
 from tools.git_tools import git_status, git_diff, git_log
 from tools.web import fetch_url
@@ -13,9 +16,12 @@ from tools.rag_tools import rag_index, rag_search, rag_list, rag_remove, rag_cle
 _TOOL_IMPLS: dict[str, Callable[..., str]] = {
     "read_file": read_file,
     "write_file": write_file,
+    "append_file": append_file,
     "edit_file": edit_file,
     "list_files": list_files,
     "search_files": search_files,
+    "get_pdf_info": get_pdf_info,
+    "read_pdf_pages": read_pdf_pages,
     "run_command": run_command,
     "git_status": git_status,
     "git_diff": git_diff,
@@ -30,7 +36,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
 }
 
 # 書き込み系ツール（実行前にユーザー確認が必要）
-DANGEROUS_TOOLS = {"write_file", "edit_file", "run_command", "apply_patch", "rag_clear"}
+DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear"}
 
 # Ollama API に渡すツール定義
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -60,6 +66,51 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "content": {"type": "string", "description": "Content to write"},
                 },
                 "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_file",
+            "description": "Append content to the end of a file. Creates the file if it doesn't exist. Use this when writing a large document in multiple chunks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to append to"},
+                    "content": {"type": "string", "description": "Content to append"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pdf_info",
+            "description": "Get metadata of a PDF file, primarily its total page count. Use this first when processing a large PDF so you know the range.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "PDF file path"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pdf_pages",
+            "description": "Read a specific page range from a PDF and return its text (1-indexed, no truncation). Use this to process large PDFs in chunks, e.g. 10 pages at a time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "PDF file path"},
+                    "start_page": {"type": "integer", "description": "Start page (1-indexed, default 1)"},
+                    "end_page": {"type": "integer", "description": "End page inclusive (default: same as start_page)"},
+                },
+                "required": ["path"],
             },
         },
     },

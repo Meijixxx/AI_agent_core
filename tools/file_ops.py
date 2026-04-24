@@ -84,6 +84,85 @@ def write_file(path: str, content: str) -> str:
         return f"[エラー] ファイル書き込み失敗: {e}"
 
 
+def append_file(path: str, content: str) -> str:
+    """ファイル末尾に追記する（ファイルが無ければ新規作成）。
+
+    大きなドキュメントをチャンク単位で書き出すときに使う。
+    """
+    abs_path, err = _safe_path(path)
+    if err:
+        return err
+    try:
+        parent = os.path.dirname(abs_path)
+        if parent and not parent.startswith(_SANDBOX_ROOT):
+            return f"[拒否] サンドボックス外にディレクトリは作成できません"
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(abs_path, "a", encoding="utf-8") as f:
+            f.write(content)
+        total = os.path.getsize(abs_path)
+        return f"追記しました: {abs_path} (+{len(content)} bytes → {total:,} bytes)"
+    except Exception as e:
+        return f"[エラー] 追記失敗: {e}"
+
+
+def get_pdf_info(path: str) -> str:
+    """PDFのページ数などメタ情報を返す。"""
+    abs_path, err = _safe_path(path)
+    if err:
+        return err
+    if not os.path.isfile(abs_path):
+        return f"[エラー] ファイルが見つかりません: {abs_path}"
+    if os.path.splitext(abs_path)[1].lower() != ".pdf":
+        return f"[エラー] PDFファイルではありません: {path}"
+    try:
+        from pdfminer.pdfpage import PDFPage  # type: ignore
+    except ImportError:
+        return "[エラー] pdfminer.six が必要です: pip install pdfminer.six"
+    try:
+        with open(abs_path, "rb") as f:
+            count = sum(1 for _ in PDFPage.get_pages(f))
+        size = os.path.getsize(abs_path)
+        return f"PDF情報 [{os.path.basename(abs_path)}]\n  ページ数: {count}\n  サイズ: {size:,} bytes"
+    except Exception as e:
+        return f"[エラー] PDF解析失敗: {e}"
+
+
+def read_pdf_pages(path: str, start_page: int = 1, end_page: int | None = None) -> str:
+    """PDFの指定ページ範囲のテキストを返す（1始まり、truncateなし）。
+
+    end_page 省略時は start_page のみ1ページ分を返す。
+    50ページ級の大きなPDFを分割して処理する用途に使う。
+    """
+    abs_path, err = _safe_path(path)
+    if err:
+        return err
+    if not os.path.isfile(abs_path):
+        return f"[エラー] ファイルが見つかりません: {abs_path}"
+    if os.path.splitext(abs_path)[1].lower() != ".pdf":
+        return f"[エラー] PDFファイルではありません: {path}"
+    try:
+        from pdfminer.high_level import extract_text  # type: ignore
+    except ImportError:
+        return "[エラー] pdfminer.six が必要です: pip install pdfminer.six"
+
+    if end_page is None:
+        end_page = start_page
+    if start_page < 1:
+        start_page = 1
+    if end_page < start_page:
+        return f"[エラー] end_page ({end_page}) は start_page ({start_page}) 以上にしてください"
+
+    # pdfminer の page_numbers は 0 始まり
+    page_numbers = list(range(start_page - 1, end_page))
+    try:
+        content = extract_text(abs_path, page_numbers=page_numbers) or ""
+    except Exception as e:
+        return f"[エラー] PDF読み込み失敗: {e}"
+    header = f"[PDF ページ {start_page}-{end_page}]\n"
+    return header + content
+
+
 def edit_file(path: str, old_text: str, new_text: str) -> str:
     """ファイル内のテキストを置換する。
 
