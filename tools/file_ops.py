@@ -31,22 +31,39 @@ def _safe_path(path: str) -> tuple[str, str | None]:
 
 
 def read_file(path: str) -> str:
-    """ファイルを読み取って内容を返す。"""
+    """ファイルを読み取って内容を返す。.pdf/.docx は専用ライブラリで抽出。"""
     abs_path, err = _safe_path(path)
     if err:
         return err
     if not os.path.isfile(abs_path):
         return f"[エラー] ファイルが見つかりません: {abs_path}"
+
+    ext = os.path.splitext(abs_path)[1].lower()
     try:
-        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        lines = content.splitlines()
-        if len(lines) > 500:
-            truncated = "\n".join(lines[:500])
-            return f"{truncated}\n\n... ({len(lines)} 行中、先頭500行を表示)"
-        return content
+        if ext == ".pdf":
+            try:
+                from pdfminer.high_level import extract_text
+            except ImportError:
+                return "[エラー] PDF読み込みには pdfminer.six が必要です: pip install pdfminer.six"
+            content = extract_text(abs_path) or ""
+        elif ext == ".docx":
+            try:
+                import docx  # type: ignore
+            except ImportError:
+                return "[エラー] docx読み込みには python-docx が必要です: pip install python-docx"
+            doc = docx.Document(abs_path)
+            content = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        else:
+            with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
     except Exception as e:
         return f"[エラー] ファイル読み取り失敗: {e}"
+
+    lines = content.splitlines()
+    if len(lines) > 500:
+        truncated = "\n".join(lines[:500])
+        return f"{truncated}\n\n... ({len(lines)} 行中、先頭500行を表示)"
+    return content
 
 
 def write_file(path: str, content: str) -> str:

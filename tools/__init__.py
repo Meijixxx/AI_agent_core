@@ -38,11 +38,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file and return it as text",
+            "description": "Read the contents of a file and return it as text. Supports .pdf and .docx in addition to text files (text is extracted automatically). Output is truncated at 500 lines.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path to read"},
+                    "path": {"type": "string", "description": "File path to read (.txt/.md/.py/.pdf/.docx etc.)"},
                 },
                 "required": ["path"],
             },
