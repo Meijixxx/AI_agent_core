@@ -163,6 +163,60 @@ def read_pdf_pages(path: str, start_page: int = 1, end_page: int | None = None) 
     return header + content
 
 
+def pdf_to_markdown(pdf_path: str, output_path: str) -> str:
+    """PDFの全テキストを抽出してファイルに書き出す（LLMを経由しない）。
+
+    大きなPDFを.mdに変換する用途では、LLMに繰り返し転記させると
+    要約やハルシネーションが発生する。このツールはpdfminerが抽出した
+    テキストをそのままファイルに書き込むため、内容の改変が起きない。
+
+    出力は「元文書そのまま」。見出しや表の美しい整形は行われない。
+    整形が必要な場合は、生成後に特定セクションだけLLMに頼むとよい。
+    """
+    abs_pdf, err = _safe_path(pdf_path)
+    if err:
+        return err
+    if not os.path.isfile(abs_pdf):
+        return f"[エラー] ファイルが見つかりません: {abs_pdf}"
+    if os.path.splitext(abs_pdf)[1].lower() != ".pdf":
+        return f"[エラー] PDFファイルではありません: {pdf_path}"
+
+    abs_out, err = _safe_path(output_path)
+    if err:
+        return err
+
+    try:
+        from pdfminer.high_level import extract_text  # type: ignore
+        from pdfminer.pdfpage import PDFPage  # type: ignore
+    except ImportError:
+        return "[エラー] pdfminer.six が必要です: pip install pdfminer.six"
+
+    try:
+        with open(abs_pdf, "rb") as f:
+            page_count = sum(1 for _ in PDFPage.get_pages(f))
+    except Exception as e:
+        return f"[エラー] PDF解析失敗: {e}"
+
+    try:
+        text = extract_text(abs_pdf) or ""
+    except Exception as e:
+        return f"[エラー] PDFテキスト抽出失敗: {e}"
+
+    try:
+        parent = os.path.dirname(abs_out)
+        if parent and not parent.startswith(_SANDBOX_ROOT):
+            return "[拒否] サンドボックス外への書き込みです"
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(abs_out, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        return f"[エラー] 書き込み失敗: {e}"
+
+    size = os.path.getsize(abs_out)
+    return f"PDF→テキスト変換完了: {abs_out} ({page_count}ページ, {size:,} bytes)"
+
+
 def edit_file(path: str, old_text: str, new_text: str) -> str:
     """ファイル内のテキストを置換する。
 

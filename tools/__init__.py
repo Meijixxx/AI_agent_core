@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 from tools.file_ops import (
     read_file, write_file, edit_file, list_files, search_files,
-    append_file, get_pdf_info, read_pdf_pages,
+    append_file, get_pdf_info, read_pdf_pages, pdf_to_markdown,
 )
 from tools.shell import run_command
 from tools.git_tools import git_status, git_diff, git_log
@@ -22,6 +22,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
     "search_files": search_files,
     "get_pdf_info": get_pdf_info,
     "read_pdf_pages": read_pdf_pages,
+    "pdf_to_markdown": pdf_to_markdown,
     "run_command": run_command,
     "git_status": git_status,
     "git_diff": git_diff,
@@ -36,7 +37,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
 }
 
 # 書き込み系ツール（実行前にユーザー確認が必要）
-DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear"}
+DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear", "pdf_to_markdown"}
 
 # Ollama API に渡すツール定義
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -111,6 +112,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "end_page": {"type": "integer", "description": "End page inclusive (default: same as start_page)"},
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pdf_to_markdown",
+            "description": "Extract full text from a PDF and write it directly to a file in one shot, WITHOUT LLM processing. Use this for large PDFs (dozens of pages) when faithful text preservation matters more than markdown formatting. The output is plain text in a .md file; you can ask the LLM to prettify specific sections afterward.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pdf_path": {"type": "string", "description": "Input PDF path"},
+                    "output_path": {"type": "string", "description": "Output .md (or .txt) path"},
+                },
+                "required": ["pdf_path", "output_path"],
             },
         },
     },
