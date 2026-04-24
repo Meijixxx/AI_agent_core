@@ -48,7 +48,10 @@ def _chat_impl(
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "options": {"num_ctx": CFG.num_ctx},
+        "options": {
+            "num_ctx": CFG.num_ctx,
+            "num_predict": CFG.num_predict,
+        },
         "think": True,
     }
     if tools:

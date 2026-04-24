@@ -2,6 +2,7 @@
 ollama_url = "http://localhost:11434"
 model = "gemma4-agent"
 num_ctx = 262144          # 260K。CPU推論では重いが128GB RAMで可能
+num_predict = -1          # 出力トークン上限。-1 で無制限（推奨）
 max_retries = 2
 timeout = 600             # 長コンテキストは生成に時間がかかるので延長
 

@@ -15,6 +15,7 @@ class Config:
     ollama_url: str = "http://localhost:11434"
     model: str = "gemma4-agent"
     num_ctx: int = 8192
+    num_predict: int = -1          # -1 = 無制限（モデル/コンテキスト次第で停止）
     max_retries: int = 2
     timeout: int = 120
 
@@ -60,6 +61,7 @@ def load_config(path: str = "config.toml") -> Config:
     cfg.ollama_url = _get(data, "llm", "ollama_url", cfg.ollama_url)
     cfg.model = _get(data, "llm", "model", cfg.model)
     cfg.num_ctx = _get(data, "llm", "num_ctx", cfg.num_ctx)
+    cfg.num_predict = _get(data, "llm", "num_predict", cfg.num_predict)
     cfg.max_retries = _get(data, "llm", "max_retries", cfg.max_retries)
     cfg.timeout = _get(data, "llm", "timeout", cfg.timeout)
 
