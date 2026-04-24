@@ -1,13 +1,13 @@
 [llm]
 ollama_url = "http://localhost:11434"
 model = "gemma4-agent"
-num_ctx = 8192
+num_ctx = 262144          # 260K。CPU推論では重いが128GB RAMで可能
 max_retries = 2
-timeout = 120
+timeout = 600             # 長コンテキストは生成に時間がかかるので延長
 
 [agent]
-max_tool_loops = 10
-max_history_messages = 40
+max_tool_loops = 30               # 大きなファイルの分割処理対応のため増やす
+max_history_messages = 80
 token_budget_warn_ratio = 0.8
 
 [paths]
