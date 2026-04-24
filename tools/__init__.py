@@ -5,7 +5,7 @@ from typing import Any, Callable
 from tools.file_ops import (
     read_file, write_file, edit_file, list_files, search_files,
     append_file, get_pdf_info, read_pdf_pages, pdf_to_markdown,
-    read_file_chunk,
+    read_file_chunk, format_japanese_markdown,
 )
 from tools.shell import run_command
 from tools.git_tools import git_status, git_diff, git_log
@@ -25,6 +25,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
     "read_pdf_pages": read_pdf_pages,
     "pdf_to_markdown": pdf_to_markdown,
     "read_file_chunk": read_file_chunk,
+    "format_japanese_markdown": format_japanese_markdown,
     "run_command": run_command,
     "git_status": git_status,
     "git_diff": git_diff,
@@ -39,7 +40,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
 }
 
 # 書き込み系ツール（実行前にユーザー確認が必要）
-DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear", "pdf_to_markdown"}
+DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear", "pdf_to_markdown", "format_japanese_markdown"}
 
 # Ollama API に渡すツール定義
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -130,6 +131,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "max_chars": {"type": "integer", "description": "Target chunk size in chars (default 50000, ≈12.5K tokens). Increase for larger num_ctx models."},
                 },
                 "required": ["path", "chunk_index"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "format_japanese_markdown",
+            "description": "Add markdown heading markers to a Japanese technical/regulatory document mechanically (NO LLM processing, zero content alteration). Detects 第N編/章/条/節/項/別表/付録 patterns and prepends #/##/### etc. Recommended for faithful structuring of raw PDF extraction. Content is preserved verbatim.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input_path": {"type": "string", "description": "Input file (raw text)"},
+                    "output_path": {"type": "string", "description": "Output .md path"},
+                },
+                "required": ["input_path", "output_path"],
             },
         },
     },
