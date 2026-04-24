@@ -254,6 +254,146 @@ def read_file_chunk(path: str, chunk_index: int = 0, max_chars: int = 5000) -> s
     return header + content
 
 
+def transform_file_with_llm(
+    input_path: str,
+    output_path: str,
+    instruction: str,
+    max_chars_per_chunk: int = 5000,
+) -> str:
+    """大きなファイル全体をチャンクごとにLLMで変換して出力ファイルに書き出す。
+
+    Python 側のループで反復を完全制御するため、LLM が途中でサボったり
+    プレースホルダーを出したりしても構造的に最後まで走る。
+    LLMは各チャンクのテキスト→テキスト変換器として呼ばれる（ツール使用なし）。
+
+    失敗したチャンクは最大2回リトライし、それでも失敗なら元テキストを
+    <!-- [変換失敗] --> マーカーつきで埋め込む（データロスなし）。
+
+    Args:
+        input_path: 入力ファイル
+        output_path: 出力先（既存ファイルは上書き）
+        instruction: 各チャンクに適用する変換指示（日本語OK）
+        max_chars_per_chunk: チャンクサイズ（デフォルト5000、出力上限対策）
+    """
+    import sys
+
+    abs_in, err = _safe_path(input_path)
+    if err:
+        return err
+    if not os.path.isfile(abs_in):
+        return f"[エラー] ファイルが見つかりません: {abs_in}"
+
+    abs_out, err = _safe_path(output_path)
+    if err:
+        return err
+
+    try:
+        with open(abs_in, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except Exception as e:
+        return f"[エラー] 読み取り失敗: {e}"
+
+    chunks = _compute_chunks(text, max_chars_per_chunk)
+    total = len(chunks)
+    if total == 0:
+        return "[エラー] ファイルが空です"
+
+    # 出力ファイルを初期化
+    try:
+        parent = os.path.dirname(abs_out)
+        if parent and not parent.startswith(_SANDBOX_ROOT):
+            return "[拒否] サンドボックス外への書き込みです"
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(abs_out, "w", encoding="utf-8") as f:
+            f.write("")
+    except Exception as e:
+        return f"[エラー] 出力ファイル初期化失敗: {e}"
+
+    system_msg = (
+        "あなたはテキスト変換エンジンです。\n"
+        "- 入力されたテキストを、指示に従って変換してください。\n"
+        "- 変換結果のテキストのみを出力し、前置き・後書き・コメントは絶対に付けないでください。\n"
+        "- 原文の内容は一字一句保持してください。要約・言い換え・補完は禁止です。\n"
+        "- 空行や章節の順序も原文通りに保ってください。\n"
+        f"\n## 変換指示\n{instruction}"
+    )
+
+    success = 0
+    failed: list[tuple[int, str]] = []
+
+    for i, (start, end, chunk_content) in enumerate(chunks):
+        print(f"  [変換 {i + 1}/{total}] 行 {start}-{end} ({len(chunk_content):,} chars)",
+              file=sys.stderr, flush=True)
+
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": chunk_content},
+        ]
+
+        transformed: str | None = None
+        last_err = ""
+        for attempt in range(2):
+            try:
+                transformed = _call_llm_once(messages)
+                if transformed and transformed.strip():
+                    break
+            except Exception as e:
+                last_err = str(e)
+            transformed = None
+
+        with open(abs_out, "a", encoding="utf-8") as f:
+            if transformed:
+                f.write(transformed)
+                if not transformed.endswith("\n"):
+                    f.write("\n")
+                f.write("\n")
+                success += 1
+            else:
+                f.write(f"\n<!-- [変換失敗 chunk{i + 1} 行{start}-{end}: {last_err}] 以下は原文 -->\n")
+                f.write(chunk_content)
+                if not chunk_content.endswith("\n"):
+                    f.write("\n")
+                f.write("\n")
+                failed.append((i + 1, last_err))
+
+    size = os.path.getsize(abs_out)
+    lines = [f"変換完了: {abs_out}"]
+    lines.append(f"  成功: {success}/{total} チャンク ({size:,} bytes)")
+    if failed:
+        lines.append(f"  失敗: {len(failed)}件 (原文のまま保持)")
+        for idx, err in failed[:5]:
+            lines.append(f"    chunk{idx}: {err[:80]}")
+    return "\n".join(lines)
+
+
+def _call_llm_once(messages: list[dict]) -> str:
+    """単発LLM呼び出し。環境変数 AGENT_EMBED_SERVER_URL があれば /chat-once 経由、
+    なければローカル llm モジュールを直接呼ぶ（main.py ローカルモード用）。
+    """
+    import os as _os
+    server_url = _os.environ.get("AGENT_EMBED_SERVER_URL", "").rstrip("/")
+    if server_url:
+        import requests as _requests
+        api_key = _os.environ.get("AGENT_EMBED_SERVER_API_KEY", "")
+        headers = {"X-API-Key": api_key} if api_key else {}
+        resp = _requests.post(
+            f"{server_url}/chat-once",
+            headers=headers,
+            json={"messages": messages},
+            timeout=1800,  # 長文変換は時間かかる
+        )
+        resp.raise_for_status()
+        return resp.json().get("content", "") or ""
+
+    # ローカルモード
+    import llm as _llm  # type: ignore
+    response = _llm.chat(messages=messages, tools=None)
+    if response is None:
+        return ""
+    return response.get("message", {}).get("content", "") or ""
+
+
 def pdf_to_markdown(pdf_path: str, output_path: str) -> str:
     """PDFの全テキストを抽出してファイルに書き出す（LLMを経由しない）。
 

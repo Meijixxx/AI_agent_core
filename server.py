@@ -151,6 +151,10 @@ class EmbedRequest(BaseModel):
     text: str
 
 
+class ChatOnceRequest(BaseModel):
+    messages: list[dict[str, Any]]
+
+
 class SaveRequest(BaseModel):
     name: str = ""
 
@@ -187,6 +191,27 @@ def embed_endpoint(req: EmbedRequest) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"embed failed: {e}")
         raise HTTPException(status_code=500, detail=f"embedding failed: {e}")
+
+
+@app.post("/chat-once", dependencies=[Depends(require_api_key)])
+def chat_once_endpoint(req: ChatOnceRequest) -> dict[str, Any]:
+    """ステートレスな単発LLM呼び出し。ツールなしのテキスト変換用。
+
+    クライアント側ツールがPythonループで反復処理する際に使う。
+    エージェント本体の会話履歴には影響しない。
+    """
+    import llm as _llm
+    try:
+        response = _llm.chat(messages=req.messages, tools=None)
+        if response is None:
+            raise HTTPException(status_code=500, detail="LLM call interrupted")
+        content = response.get("message", {}).get("content", "") or ""
+        return {"content": content}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"chat_once failed: {e}")
+        raise HTTPException(status_code=500, detail=f"chat_once failed: {e}")
 
 
 @app.post("/sessions", dependencies=[Depends(require_api_key)])

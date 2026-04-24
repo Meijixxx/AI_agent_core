@@ -5,7 +5,7 @@ from typing import Any, Callable
 from tools.file_ops import (
     read_file, write_file, edit_file, list_files, search_files,
     append_file, get_pdf_info, read_pdf_pages, pdf_to_markdown,
-    read_file_chunk,
+    read_file_chunk, transform_file_with_llm,
 )
 from tools.shell import run_command
 from tools.git_tools import git_status, git_diff, git_log
@@ -25,6 +25,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
     "read_pdf_pages": read_pdf_pages,
     "pdf_to_markdown": pdf_to_markdown,
     "read_file_chunk": read_file_chunk,
+    "transform_file_with_llm": transform_file_with_llm,
     "run_command": run_command,
     "git_status": git_status,
     "git_diff": git_diff,
@@ -39,7 +40,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
 }
 
 # 書き込み系ツール（実行前にユーザー確認が必要）
-DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear", "pdf_to_markdown"}
+DANGEROUS_TOOLS = {"write_file", "append_file", "edit_file", "run_command", "apply_patch", "rag_clear", "pdf_to_markdown", "transform_file_with_llm"}
 
 # Ollama API に渡すツール定義
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -130,6 +131,23 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "max_chars": {"type": "integer", "description": "Target chunk size in chars (default 5000, ≈1.2K tokens). Keep small because output token budget is the bottleneck, not input context."},
                 },
                 "required": ["path", "chunk_index"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "transform_file_with_llm",
+            "description": "Transform an entire file by processing it chunk-by-chunk through the LLM, with Python-controlled iteration. Use this for reliable conversion of LARGE files (markdown formatting, translation, etc.) - unlike manual read_file_chunk loops, this guarantees completion because iteration is in code, not LLM. LLM is called per-chunk as a text transformer (no tool use). Failed chunks are kept verbatim with error markers so no data is lost.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input_path": {"type": "string", "description": "Input file path"},
+                    "output_path": {"type": "string", "description": "Output file path (overwritten)"},
+                    "instruction": {"type": "string", "description": "Transformation instruction applied to each chunk (Japanese OK). Example: '以下を # ## ### 見出し、- 箇条書き、| ... | テーブルを使ったmarkdownに整形してください。本文は一字一句保持してください。'"},
+                    "max_chars_per_chunk": {"type": "integer", "description": "Chunk size in chars (default 5000)"},
+                },
+                "required": ["input_path", "output_path", "instruction"],
             },
         },
     },
