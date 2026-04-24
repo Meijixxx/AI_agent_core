@@ -234,6 +234,10 @@ def main() -> None:
     cwd = os.getcwd()
     set_sandbox_root(cwd)
 
+    # RAG の embedding をサーバ経由にする（クライアントPCにOllama不要にするため）
+    os.environ["AGENT_EMBED_SERVER_URL"] = base_url
+    os.environ["AGENT_EMBED_SERVER_API_KEY"] = args.api_key
+
     # ヘルスチェック
     try:
         r = requests.get(f"{base_url}/health", timeout=10)

@@ -147,6 +147,10 @@ class ToolResultRequest(BaseModel):
     content: str
 
 
+class EmbedRequest(BaseModel):
+    text: str
+
+
 # --- エンドポイント ---
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -156,6 +160,25 @@ def health() -> dict[str, Any]:
         "num_ctx": CFG.num_ctx,
         "sessions": len(_sessions),
     }
+
+
+@app.post("/embed", dependencies=[Depends(require_api_key)])
+def embed_endpoint(req: EmbedRequest) -> dict[str, Any]:
+    """サーバー側の Ollama に embedding 生成を委譲する。
+    クライアントPCからOllamaが見えない環境向け。
+    """
+    import requests as _requests
+    try:
+        resp = _requests.post(
+            f"{CFG.ollama_url}/api/embeddings",
+            json={"model": CFG.embedding_model, "prompt": req.text},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return {"embedding": resp.json()["embedding"]}
+    except Exception as e:
+        logger.error(f"embed failed: {e}")
+        raise HTTPException(status_code=500, detail=f"embedding failed: {e}")
 
 
 @app.post("/sessions", dependencies=[Depends(require_api_key)])
