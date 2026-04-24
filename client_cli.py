@@ -76,6 +76,19 @@ class ProgressTimer:
             time.sleep(0.1)
 
 
+def print_help() -> None:
+    """利用可能なコマンドを表示する。"""
+    print("  コマンド:")
+    print("    /quit            - 終了（セッションは保持）")
+    print("    /end             - サーバ上のセッションを削除して終了")
+    print("    /clear           - 会話履歴をクリア（system promptは残す）")
+    print("    /save [name]     - セッションを保存（name省略時は日時）")
+    print("    /load <name>     - 保存済みセッションを復元")
+    print("    /list-sessions   - 保存済みセッション一覧（サーバ側）")
+    print("    /stats           - セッション統計を表示")
+    print("    /help            - このヘルプを表示")
+
+
 def format_args(arguments: dict) -> str:
     """ツール引数を短く整形する。"""
     parts = []
@@ -271,7 +284,7 @@ def main() -> None:
     else:
         print(f"  セッション: {session_id} (継続)")
 
-    print("  コマンド: /quit 終了 | /stats 統計 | /end セッション削除")
+    print_help()
     print()
 
     while True:
@@ -288,11 +301,76 @@ def main() -> None:
             print("Bye!")
             break
 
+        if user_input == "/help":
+            print_help()
+            continue
+
         if user_input == "/stats":
             try:
                 r = requests.get(f"{base_url}/sessions/{session_id}/stats", headers=headers, timeout=10)
                 r.raise_for_status()
                 print(r.json().get("display", ""))
+            except Exception as e:
+                print(f"[エラー] {e}")
+            continue
+
+        if user_input == "/clear":
+            try:
+                r = requests.post(f"{base_url}/sessions/{session_id}/clear", headers=headers, timeout=10)
+                r.raise_for_status()
+                print(r.json().get("message", "[履歴クリア]"))
+            except Exception as e:
+                print(f"[エラー] {e}")
+            continue
+
+        if user_input == "/list-sessions":
+            try:
+                r = requests.get(f"{base_url}/saved-sessions", headers=headers, timeout=10)
+                r.raise_for_status()
+                items = r.json().get("sessions", [])
+                if not items:
+                    print("(保存済みセッションなし)")
+                else:
+                    print("保存済みセッション:")
+                    from datetime import datetime as _dt
+                    for it in items:
+                        ts = _dt.fromtimestamp(it["mtime"]).strftime("%Y-%m-%d %H:%M")
+                        print(f"  {it['name']:<30} {it['size']:>8} bytes  {ts}")
+            except Exception as e:
+                print(f"[エラー] {e}")
+            continue
+
+        if user_input.startswith("/save"):
+            parts = user_input.split(maxsplit=1)
+            name = parts[1].strip() if len(parts) > 1 else ""
+            try:
+                r = requests.post(
+                    f"{base_url}/sessions/{session_id}/save",
+                    headers=headers,
+                    json={"name": name},
+                    timeout=10,
+                )
+                r.raise_for_status()
+                print(r.json().get("message", "[保存完了]"))
+            except Exception as e:
+                print(f"[エラー] {e}")
+            continue
+
+        if user_input.startswith("/load"):
+            parts = user_input.split(maxsplit=1)
+            if len(parts) < 2:
+                print("[ヒント] /load <name> で指定。/list-sessions で一覧表示")
+                continue
+            name = parts[1].strip()
+            try:
+                r = requests.post(
+                    f"{base_url}/sessions/{session_id}/load",
+                    headers=headers,
+                    json={"name": name},
+                    timeout=10,
+                )
+                r.raise_for_status()
+                print(r.json().get("message", "[読み込み完了]"))
             except Exception as e:
                 print(f"[エラー] {e}")
             continue
@@ -304,6 +382,10 @@ def main() -> None:
             except Exception as e:
                 print(f"[エラー] {e}")
             break
+
+        if user_input.startswith("/"):
+            print(f"[不明なコマンド] {user_input} (/help で一覧)")
+            continue
 
         chat_once(base_url, headers, session_id, user_input, auto_confirm=args.yes)
 

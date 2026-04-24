@@ -151,6 +151,14 @@ class EmbedRequest(BaseModel):
     text: str
 
 
+class SaveRequest(BaseModel):
+    name: str = ""
+
+
+class LoadRequest(BaseModel):
+    name: str
+
+
 # --- エンドポイント ---
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -234,6 +242,64 @@ def stats(session_id: str) -> dict[str, Any]:
         "session_id": session_id,
         "display": state.agent.get_stats_display(),
     }
+
+
+def _session_path(name: str) -> str:
+    """セッションファイル名をサニタイズして絶対パスを返す。"""
+    import re
+    safe = re.sub(r"[^A-Za-z0-9._-]", "", name)
+    if not safe:
+        safe = uuid.uuid4().hex[:8]
+    os.makedirs(CFG.session_dir, exist_ok=True)
+    return os.path.join(CFG.session_dir, f"{safe}.json")
+
+
+@app.post("/sessions/{session_id}/save", dependencies=[Depends(require_api_key)])
+def save_session(session_id: str, req: SaveRequest) -> dict[str, str]:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    from datetime import datetime
+    name = req.name.strip() or datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = _session_path(name)
+    msg = state.agent.save_session(path)
+    return {"status": "ok", "message": msg}
+
+
+@app.post("/sessions/{session_id}/load", dependencies=[Depends(require_api_key)])
+def load_session(session_id: str, req: LoadRequest) -> dict[str, str]:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    path = _session_path(req.name)
+    msg = state.agent.load_session(path)
+    return {"status": "ok", "message": msg}
+
+
+@app.get("/saved-sessions", dependencies=[Depends(require_api_key)])
+def list_saved_sessions() -> dict[str, Any]:
+    if not os.path.isdir(CFG.session_dir):
+        return {"sessions": []}
+    files = sorted(f for f in os.listdir(CFG.session_dir) if f.endswith(".json"))
+    items = []
+    for f in files:
+        path = os.path.join(CFG.session_dir, f)
+        items.append({
+            "name": f[:-5],
+            "size": os.path.getsize(path),
+            "mtime": int(os.path.getmtime(path)),
+        })
+    return {"sessions": items}
+
+
+@app.post("/sessions/{session_id}/clear", dependencies=[Depends(require_api_key)])
+def clear_session(session_id: str) -> dict[str, str]:
+    """会話履歴をクリアする（system promptは残す）。"""
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    state.agent.messages = state.agent.messages[:1]
+    return {"status": "ok", "message": "履歴をクリアしました"}
 
 
 # --- エントリポイント ---
