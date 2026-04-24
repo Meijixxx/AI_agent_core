@@ -5,6 +5,7 @@ from typing import Any, Callable
 from tools.file_ops import (
     read_file, write_file, edit_file, list_files, search_files,
     append_file, get_pdf_info, read_pdf_pages, pdf_to_markdown,
+    read_file_chunk,
 )
 from tools.shell import run_command
 from tools.git_tools import git_status, git_diff, git_log
@@ -23,6 +24,7 @@ _TOOL_IMPLS: dict[str, Callable[..., str]] = {
     "get_pdf_info": get_pdf_info,
     "read_pdf_pages": read_pdf_pages,
     "pdf_to_markdown": pdf_to_markdown,
+    "read_file_chunk": read_file_chunk,
     "run_command": run_command,
     "git_status": git_status,
     "git_diff": git_diff,
@@ -112,6 +114,22 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "end_page": {"type": "integer", "description": "End page inclusive (default: same as start_page)"},
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file_chunk",
+            "description": "Read one chunk of a large file split at paragraph/codeblock/table boundaries (not breaking structures). Use this for iterative LLM formatting of large .md files. chunk_index is 0-based. Returns '[EOF]' when past the last chunk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "chunk_index": {"type": "integer", "description": "0-based chunk index"},
+                    "max_chars": {"type": "integer", "description": "Target chunk size in chars (default 3000)"},
+                },
+                "required": ["path", "chunk_index"],
             },
         },
     },

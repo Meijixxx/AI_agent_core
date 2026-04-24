@@ -163,6 +163,95 @@ def read_pdf_pages(path: str, start_page: int = 1, end_page: int | None = None) 
     return header + content
 
 
+def _compute_chunks(text: str, max_chars: int) -> list[tuple[int, int, str]]:
+    """テキストを整形しやすい境界で分割する。
+
+    境界判定:
+      - 段落境界（空行）で分割
+      - コードブロック（``` で囲まれた範囲）内では分割しない
+      - 表（連続する | で始まる行）内では分割しない
+
+    Returns: [(start_line_1idx, end_line_1idx, content), ...]
+    """
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return []
+
+    chunks: list[tuple[int, int, str]] = []
+    start = 0
+    size = 0
+    in_code = False
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        size += len(line)
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            in_code = not in_code
+
+        is_blank = stripped == ""
+        # 表の途中かどうか: 前後の非空行が `|` で始まるかで判定
+        in_table = False
+        if is_blank and not in_code:
+            # 前後の非空行がともに | で始まるなら表の途中の空行と見なす（通常は無いが念のため）
+            prev = next((lines[j].strip() for j in range(i - 1, -1, -1) if lines[j].strip()), "")
+            nxt = next((lines[j].strip() for j in range(i + 1, len(lines)) if lines[j].strip()), "")
+            if prev.startswith("|") and nxt.startswith("|"):
+                in_table = True
+
+        can_split = is_blank and not in_code and not in_table and size >= max_chars
+
+        if can_split:
+            content = "".join(lines[start : i + 1])
+            chunks.append((start + 1, i + 1, content))
+            start = i + 1
+            size = 0
+
+        i += 1
+
+    if start < len(lines):
+        content = "".join(lines[start:])
+        chunks.append((start + 1, len(lines), content))
+
+    return chunks
+
+
+def read_file_chunk(path: str, chunk_index: int = 0, max_chars: int = 3000) -> str:
+    """ファイルを段落/コードブロック境界で分割し、N番目のチャンクを返す（0始まり）。
+
+    大きなmdやテキストファイルをLLMで整形する際、ページ単位ではなく
+    構造を壊さない境界で区切って処理するために使う。
+    最後のチャンクより後を指定すると [EOF] を返す。
+    """
+    abs_path, err = _safe_path(path)
+    if err:
+        return err
+    if not os.path.isfile(abs_path):
+        return f"[エラー] ファイルが見つかりません: {abs_path}"
+
+    try:
+        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except Exception as e:
+        return f"[エラー] 読み取り失敗: {e}"
+
+    chunks = _compute_chunks(text, max_chars)
+    total = len(chunks)
+
+    if total == 0:
+        return "[EOF] ファイルが空です"
+    if chunk_index < 0:
+        return f"[エラー] chunk_index は 0 以上を指定してください（0..{total-1}）"
+    if chunk_index >= total:
+        return f"[EOF] 全{total}チャンク完了（chunk_index={chunk_index} は範囲外）"
+
+    start, end, content = chunks[chunk_index]
+    header = f"[チャンク {chunk_index + 1}/{total}] 行 {start}-{end} ({len(content):,} chars)\n"
+    return header + content
+
+
 def pdf_to_markdown(pdf_path: str, output_path: str) -> str:
     """PDFの全テキストを抽出してファイルに書き出す（LLMを経由しない）。
 

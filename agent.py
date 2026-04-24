@@ -50,6 +50,9 @@ class Agent:
         self.auto_confirm = auto_confirm
         # tool_executor を差し替えることでリモート実行（クライアントで実行）に対応
         self.tool_executor: Callable[[str, dict[str, Any]], str] = tool_executor or execute_tool
+        # リモート実行時はツール呼び出し/結果をサーバ側で表示しない
+        # （クライアントが自分で表示するため二重表示を防ぐ）
+        self._is_remote = tool_executor is not None
         # progress_callback: LLM生成中の経過秒数を通知（サーバ→クライアント転送用）
         self.progress_callback = progress_callback
         self.logger = get_logger()
@@ -144,10 +147,14 @@ class Agent:
                         self.logger.info(f"{name} skipped by user")
                         continue
 
-                self._print_tool_call(name, arguments)
+                # リモート実行時はクライアント側で表示するため重複を避ける
+                if not self._is_remote:
+                    self._print_tool_call(name, arguments)
 
                 result = self.tool_executor(name, arguments)
-                print(f"  → {self._truncate(result, 200)}")
+
+                if not self._is_remote:
+                    print(f"  → {self._truncate(result, 200)}")
                 self.logger.info(f"tool result: {self._truncate(result, 500)}")
 
                 self.messages.append({
